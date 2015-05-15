@@ -204,7 +204,6 @@ impl Client {
         subs.insert(self.ssid, subcb);
     }
 
-    // TODO: Investigate deadlock
     pub fn send_command(command: String, eio: Arc<Mutex<BufStream<TcpStream>>>) {
         // println!("About to send: {}", command);
         let mut nats_io = eio.clone();
@@ -349,6 +348,8 @@ fn main() {
 
     let mut nats = Client::new("192.168.0.2:4222");
     let mut opts = HashMap::new();
+    opts.insert("user", "hello");
+    opts.insert("pass", "world");
 
     match nats.connect(&mut opts) {
         Ok(()) => println!("Successfully connected!"),
