@@ -137,9 +137,6 @@ impl Client {
 
                     let connect_op = format!("{} {}{}", CONNECT, connect_payload.to_string(), CR_LF);
 
-                    // TODO: Deadlock
-                    // Client::send_command(connect_op.to_string(), self.io.clone());
-
                     let send_result = {
                         let mut nats_io = self.io.clone();
                         let mut io = nats_io.try_lock().unwrap();
@@ -149,12 +146,12 @@ impl Client {
                     match send_result {
                         Err(e) => panic!("Failed to connect! {}", e),
                         Ok(_) => {
-                            println!("CMD sent: {}", connect_op);
+                            // println!("CMD sent: {}", connect_op);
                         }
                     }
                 } else {
                     // Just CONNECT
-                    println!("Got INFO! Sending CONNECT without auth...");
+                    // println!("Sending CONNECT without auth...");
                     let connect_payload = json::encode(&ConnectOp{
                         pedantic: false,
                         verbose: false,
@@ -164,9 +161,6 @@ impl Client {
 
                     let connect_op = format!("{} {}{}", CONNECT, connect_payload.to_string(), CR_LF);
 
-                    // TODO: Deadlock
-                    // Client::send_command(connect_op.to_string(), self.io.clone());
-
                     let send_result = {
                         let mut nats_io = self.io.clone();
                         let mut io = nats_io.try_lock().unwrap();
@@ -176,7 +170,7 @@ impl Client {
                     match send_result {
                         Err(e) => panic!("Failed to connect! {}", e),
                         Ok(_) => {
-                            println!("CMD sent: {}", connect_op);
+                            // println!("CMD sent: {}", connect_op);
                         }
                     }
                 }
@@ -191,11 +185,6 @@ impl Client {
 
         // TODO: Return proper Result type
         Ok(())
-    }
-
-    // TODO: Gracefully exit... does it make sense in Rust?
-    pub fn close(&self) {
-        println!("NATS client stopping...");
     }
 
     pub fn publish(&self, subject: &str, message: String) {
@@ -217,9 +206,7 @@ impl Client {
 
     // TODO: Investigate deadlock
     pub fn send_command(command: String, eio: Arc<Mutex<BufStream<TcpStream>>>) {
-
-        println!("About to send: {}", command);
-
+        // println!("About to send: {}", command);
         let mut nats_io = eio.clone();
         let mut io = nats_io.try_lock().unwrap();
         let send_result = write!(io, "{}", command);
@@ -227,7 +214,7 @@ impl Client {
         match send_result {
             Err(e) => panic!("Failed to connect! {}", e),
             Ok(_) => {
-                println!("CMD sent: {}", command);
+                // println!("CMD sent: {}", command);
             }
         }
 
