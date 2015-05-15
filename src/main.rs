@@ -78,11 +78,8 @@ pub struct Client {
     io: Arc<Mutex<BufStream<TcpStream>>>,
     options:  HashMap<&'static str, &'static str>,
     ssid: u8,
-    // subs: HashMap<u8, Box<Fn(&str, &Client)>>,
-    subs: HashMap<u8, Box<Fn(&str)>>,
+    subs: Arc<Mutex<HashMap<u8, Box<Fn(&str) + Send>>>>, // TODO: needs client too
 }
-
-pub struct Parser;
 
 impl Client {
 
@@ -96,7 +93,7 @@ impl Client {
             io: io,
             options: HashMap::new(),
             ssid: 1,
-            subs: HashMap::new(),
+            subs: Arc::new(Mutex::new(HashMap::new())),
         };
     }
 
@@ -190,7 +187,7 @@ impl Client {
 
         // Starts the thread which processes the messsages
         // and dispatches the subscription callbacks
-        Parser::process_protocol(&self, self.io.clone());
+        Parser::process_protocol(self.io.clone(), self.subs.clone());
 
         // TODO: Return proper Result type
         Ok(())
@@ -207,17 +204,20 @@ impl Client {
         Client::send_command(pub_op.to_string(), self.io.clone());
     }
 
-    pub fn subscribe(&mut self, subject: &str, subcb: Box<Fn(&str)>) {
+    pub fn subscribe(&mut self, subject: &str, subcb: Box<Fn(&str) + Send>) {
         self.ssid += 1; // TODO: No issues so far in borrow checker but should be Arc
         let sub_op = format!("{} {} {}{}", SUB, subject, self.ssid, CR_LF);
         Client::send_command(sub_op.to_string(), self.io.clone());
 
         // Store the callback to be dispatched
-        &self.subs.insert(self.ssid, subcb);
+        let _subs = self.subs.clone();
+        let mut subs  = _subs.try_lock().unwrap();        
+        subs.insert(self.ssid, subcb);
     }
 
     // TODO: Investigate deadlock
     pub fn send_command(command: String, eio: Arc<Mutex<BufStream<TcpStream>>>) {
+
         println!("About to send: {}", command);
 
         let mut nats_io = eio.clone();
@@ -251,9 +251,12 @@ impl Client {
     }
 }
 
+pub struct Parser;
+
 impl Parser {
 
-    pub fn process_protocol(nats: &Client, eio: Arc<Mutex<BufStream<TcpStream>>>) {
+    pub fn process_protocol(eio: Arc<Mutex<BufStream<TcpStream>>>,
+                            esubs: Arc<Mutex<HashMap<u8, Box<Fn(&str) + Send>>>>) {
 
         thread::spawn(move || {
             loop {
@@ -301,7 +304,7 @@ impl Parser {
                                 // PUB: MSG workers.double 3 8
                                 println!("Simple PUB");
                                 let msg_subject = msg_op[1];
-                                let msg_sub_id = msg_op[2];
+                                let mut msg_sub_id = msg_op[2].trim().parse::<u8>().unwrap();
                                 let mut msg_size = msg_op[3].trim().parse::<u64>().unwrap();
                                 println!("Reading MSG payload for: {}", msg_subject);
 
@@ -321,13 +324,14 @@ impl Parser {
                                 };
 
                                 println!("Got: {}", msg_payload);
+                                println!("Will dispatch ssid: {}", msg_sub_id);
 
                                 // TODO: Dispatch the callback using proper type
                                 //
-                                // let cb = {
-                                //     let subs = nats.subs;
-                                //     subs.get(&2).unwrap()
-                                // };
+                                let _subs = esubs.clone();
+                                let mut subs = _subs.try_lock().unwrap();        
+                                let cb = subs.get(&msg_sub_id).unwrap();
+                                cb(&msg_payload);
                             },
                             5 => {
                                 // TODO: Implement request pattern
@@ -356,7 +360,7 @@ impl Parser {
 fn main() {
     println!("--------- Rust NATS client prototype --------");
 
-    let mut nats = Client::new("10.42.0.36:4222");
+    let mut nats = Client::new("192.168.0.2:4222");
     let mut opts = HashMap::new();
 
     match nats.connect(&mut opts) {
@@ -371,16 +375,17 @@ fn main() {
 
     nats.subscribe("workers.double",
                    Box::new(|msg| {
-                       let n = msg.parse::<u8>().unwrap();
+                       let m = msg.trim();
+                       let n = m.parse::<u8>().unwrap();
                        let result = n * 2;
-                       println!("{} x 2 = {}", msg, result);
+                       println!("{} x 2 = {}", m, result);
 
                        // TODO: Borrow again the connection to publish the result
                        // nats.publish("workers.results", result.to_string());
                    }));
 
     // Subscription should double the number
-    nats.publish("workers.double", "10".to_string());
+    nats.publish("workers.double", "20".to_string());
 
     loop {}
 }
