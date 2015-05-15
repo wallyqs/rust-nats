@@ -78,7 +78,7 @@ pub struct Client {
     io: Arc<Mutex<BufStream<TcpStream>>>,
     options:  HashMap<&'static str, &'static str>,
     ssid: u8,
-    subs: Arc<Mutex<HashMap<u8, Box<Fn(&str) + Send>>>>, // TODO: needs client too
+    subs: Arc<Mutex<HashMap<u8, Box<Fn(&str, Arc<Mutex<&Client>>) + Send>>>>, // TODO: needs client too
 }
 
 impl Client {
@@ -97,7 +97,7 @@ impl Client {
         };
     }
 
-    pub fn connect(&self, options: &mut HashMap<&str, &str>) -> Result<(), &str> {
+    pub fn connect(&self, options: &mut HashMap<&str, &str>, enats: Arc<Mutex<&Client>>) -> Result<(), &str> {
         println!("Connecting...");
 
         // TODO: Implement pongs handler callback
@@ -187,7 +187,7 @@ impl Client {
 
         // Starts the thread which processes the messsages
         // and dispatches the subscription callbacks
-        Parser::process_protocol(self.io.clone(), self.subs.clone());
+        Parser::process_protocol(self.io.clone(), self.subs.clone(), enats.clone());
 
         // TODO: Return proper Result type
         Ok(())
@@ -204,7 +204,7 @@ impl Client {
         Client::send_command(pub_op.to_string(), self.io.clone());
     }
 
-    pub fn subscribe(&mut self, subject: &str, subcb: Box<Fn(&str) + Send>) {
+    pub fn subscribe(&mut self, subject: &str, subcb: Box<Fn(&str, Arc<Mutex<&Client>>) + Send>) {
         self.ssid += 1; // TODO: No issues so far in borrow checker but should be Arc
         let sub_op = format!("{} {} {}{}", SUB, subject, self.ssid, CR_LF);
         Client::send_command(sub_op.to_string(), self.io.clone());
@@ -256,7 +256,8 @@ pub struct Parser;
 impl Parser {
 
     pub fn process_protocol(eio: Arc<Mutex<BufStream<TcpStream>>>,
-                            esubs: Arc<Mutex<HashMap<u8, Box<Fn(&str) + Send>>>>) {
+                            esubs: Arc<Mutex<HashMap<u8, Box<Fn(&str, Arc<Mutex<&Client>>) + Send>>>>,
+                            enats: Arc<Mutex<&Client>>) {
 
         thread::spawn(move || {
             loop {
@@ -331,7 +332,7 @@ impl Parser {
                                 let _subs = esubs.clone();
                                 let mut subs = _subs.try_lock().unwrap();        
                                 let cb = subs.get(&msg_sub_id).unwrap();
-                                cb(&msg_payload);
+                                cb(&msg_payload, enats.clone());
                             },
                             5 => {
                                 // TODO: Implement request pattern
@@ -363,28 +364,32 @@ fn main() {
     let mut nats = Client::new("192.168.0.2:4222");
     let mut opts = HashMap::new();
 
-    match nats.connect(&mut opts) {
+    let enats = Arc::new(Mutex::new(&nats));
+    match nats.connect(&mut opts, enats) {
         Ok(()) => println!("Successfully connected!"),
         Err(e) => println!("Failed! {}", e)
     }
 
     nats.subscribe("workers.results",
-                   Box::new(|msg| {
+                   Box::new(|msg, nats| {
                        println!("Results: {}", msg);
                    }));
 
     nats.subscribe("workers.double",
-                   Box::new(|msg| {
+                   Box::new(|msg, nats| {
                        let m = msg.trim();
                        let n = m.parse::<u8>().unwrap();
                        let result = n * 2;
                        println!("{} x 2 = {}", m, result);
 
                        // TODO: Borrow again the connection to publish the result
+                       // let n = nats.clone();
                        // nats.publish("workers.results", result.to_string());
                    }));
 
     // Subscription should double the number
+    // thread::sleep_ms(500);
+
     nats.publish("workers.double", "20".to_string());
 
     loop {}
