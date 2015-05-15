@@ -8,7 +8,7 @@ Here is an example of how it looks at the moment:
 
 ```rust
 fn main() {
-    let mut nats = Client::new(127.0.0.1:4222");
+    let mut nats = Client::new("127.0.0.1:4222");
     let mut opts = HashMap::new();
     opts.insert("user", "hello");
     opts.insert("pass", "world");
