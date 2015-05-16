@@ -3,7 +3,7 @@
 //
 //  Copyright (c) 2015 Waldemar Quevedo. All rights reserved.
 //
-// Permission is hereby granted, free of charge, to any person
+//  Permission is hereby granted, free of charge, to any person
 //  obtaining a copy of this software and associated documentation
 //  files (the "Software"), to deal in the Software without
 //  restriction, including without limitation the rights to use, copy,
@@ -28,6 +28,7 @@
 #![allow(dead_code)]
 #![allow(unused_mut)]
 #![allow(unused_imports)]
+#![allow(unused_must_use)]
 
 use std::collections::HashMap;
 use std::io::BufRead;
@@ -36,6 +37,7 @@ use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::channel;
 use std::thread;
 
 extern crate rustc_serialize;
@@ -344,36 +346,32 @@ impl Parser {
 }
 
 fn main() {
-    println!("--------- Rust NATS client prototype --------");
-
     let mut nats = Client::new("192.168.0.2:4222");
     let mut opts = HashMap::new();
-    opts.insert("user", "hello");
-    opts.insert("pass", "world");
+    opts.insert("user", "");
+    opts.insert("pass", "");
 
     match nats.connect(&mut opts) {
         Ok(()) => println!("Successfully connected!"),
         Err(e) => println!("Failed! {}", e)
     }
 
-    nats.subscribe("workers.results",
-                   Box::new(|msg| {
-                       println!("Results: {}", msg);
-                   }));
-
+    let (tx, rx) = channel();
+    
     nats.subscribe("workers.double",
-                   Box::new(|msg| {
+                   Box::new(move |msg| {
+                       let tx = tx.clone();
                        let m = msg.trim();
-                       let n = m.parse::<u8>().unwrap();
+                       let n = m.parse::<u64>().unwrap();
                        let result = n * 2;
                        println!("{} x 2 = {}", m, result);
-
-                       // TODO: Borrow again the connection to publish the result
-                       // nats.publish("workers.results", result.to_string());
+                       tx.send("DONE!");
                    }));
 
     // Subscription should double the number
     nats.publish("workers.double", "20".to_string());
 
-    loop {}
+    // Stop when done
+    let done = rx.recv().unwrap();
+    println!("Status: {}", done);
 }
