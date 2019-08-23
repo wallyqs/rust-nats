@@ -30,17 +30,6 @@ const ERR:     &'static str = "-ERR";
 const CR_LF:   &'static str = "\r\n";
 const SPC:     &'static str = " ";
 
-// #[derive(Serialize, Deserialize, Debug)]
-// struct ServerInfo {
-//     server_id: String,
-//     host: String,
-//     port: i64,
-//     version: String,
-//     auth_required: bool,
-//     tls_required:  bool,
-//     max_payload: i64,
-// }
-
 #[derive(Serialize, Deserialize, Debug)]
 struct ConnectOp {
     verbose: bool,
@@ -48,22 +37,18 @@ struct ConnectOp {
 }
 
 fn main() -> io::Result<()> {
-    // TODO: should be
     // async fn process_connect_init
     task::block_on(async {
         // Raw I/O
         let mut socket = TcpStream::connect("127.0.0.1:4222").await?;
         let mut stream = BufReader::new(&mut socket);
 
-        // TODO: Borrow checker complains here.
-        // println!("Connected to {}", &socket.peer_addr()?);
-
         let info_line = {
             let mut l = String::new();
+            let mut stream = BufReader::new(&mut socket);
             stream.read_line(&mut l).await?;
             l
         };
-        // println!("-> {}", info_line);
         let mut proto = info_line.splitn(2, " ");
         let nats_op = proto.nth(0);
 
@@ -76,7 +61,7 @@ fn main() -> io::Result<()> {
             None => panic!("No INFO from server!"),
         }
 
-        // TODO: unwrap
+        // FIXME: unwrap
         let connect_payload = serde_json::to_string(&ConnectOp{
             pedantic: false,
             verbose: false,
@@ -88,81 +73,59 @@ fn main() -> io::Result<()> {
         let ping_op = format!("{}", PING);
         socket.write_all(ping_op.as_bytes()).await?;
 
-        // Wait for pong
-        // let mut pong_line = String::new();
-        // stream.read_line(&mut pong_line).await?;
-        // println!("-> {}", pong_line);
-        // match pong_line {
-        //     "PONG\r\n" => {
-        //         println!("Got PONG");
-        //     },
-        // }
+        // Wait for pong...
+        let pong_line = {
+            let mut l = String::new();
+            let mut stream = BufReader::new(&mut socket);
+            stream.read_line(&mut l).await?;
+            l
+        };
 
-        // TODO: map of callbacks
+        // TODO: map of callbacks ((Arc, Mutex, [sid] -> async Fn))?
         let sub_op = format!("{} hello 1 {}", SUB, CR_LF);
         socket.write_all(sub_op.as_bytes()).await?;
 
         // Need to borrow once again here somehow.
-        // async fn foo(s: &mut TcpStream){
-        async fn foo(){
-            // PONG back here.
-            println!("Got message!!!!!!");
-            // let pong_op = format!("{}", PONG);
-            // socket.write_all(pong_op.as_bytes()).await;
+        async fn foo(s: &mut TcpStream){
+            println!("->> Sending...");
+            let pub_op = format!("{} foo 0{}{}", PUB, CR_LF, CR_LF);
+            s.write_all(pub_op.as_bytes()).await;
         };
 
-        // let foo = async move {
-        //     println!("Got messasge!!!!!!!!!");
-        // };
+        async fn bar(s: &mut TcpStream){
+            println!("->> Sending...");
+            let pub_op = format!("{} bar 0{}{}", PUB, CR_LF, CR_LF);
+            s.write_all(pub_op.as_bytes()).await;
+        };
 
-        // reader
+        // --- connect init ends ownership here and passes it to the read_task.
+
+        // 'read_loop' task
         task::spawn(async move {
-            // TODO: borrowed value does not live enough
-            println!("waiting for messages");
-            // try with clone?
-            // let mut ss2 = &mut socket;
-            // let mut str2 = BufReader::new(ss2);
             loop {
                 // Await the line.
                 let line = {
-                    let mut str2 = BufReader::new(&mut socket);
+                    // TODO: Borrow each time here??
+                    let mut stream = BufReader::new(&mut socket);
                     let mut l = String::new();
-                    str2.read_line(&mut l).await;
+                    stream.read_line(&mut l).await;
                     l
                 };
-                // Await the payload waiting for number of bytes.
-                println!("{}", line);
+                // TODO: Await the payload and make a read for number of bytes.
+                println!("<<- Received.. {:?}", line);
 
-                // Take copy of payload here...
-                // foo(&mut socket).await;
-                // foo(&mut ss2).await;
-                let pub_op = format!("{} foo 0{}{}", PUB, CR_LF, CR_LF);
-                socket.write_all(pub_op.as_bytes()).await;
-                foo().await;
+                // TODO: callbacks that can be defined dynamically.
+                foo(&mut socket).await;
+                bar(&mut socket).await;
             }
         });
-        // task::block_on(client_task);
 
-        // select {} || try to publish here too
+        // 'select {}'
         task::block_on(async {
             loop {
-                // let line = {
-                //     let mut l = String::new();
-                //     // nst.read_line(&mut l).await;
-                //     l
-                // };
-                // println!("------------LINE: {}", line);
-                println!("running...");
                 task::sleep(Duration::from_millis(2000)).await;
             }
         });
-
-        // TODO: Run forever and execute the callback dynamically defined.
-        // let future = async move {
-        //     // Scope of the future, request response
-        //     // would work like this.
-        //     // Ok(())
-        // };
         
         Ok(())
     })
