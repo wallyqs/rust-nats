@@ -1,0 +1,8 @@
+[package]
+name = "async-std-nats"
+version = "0.1.0"
+authors = ["Waldemar Quevedo <wally@nats.io>"]
+edition = "2018"
+
+[dependencies]
+async-std = "0.99.4"
